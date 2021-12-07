@@ -1,0 +1,263 @@
+import json
+import pandas as pd
+import time
+import numpy as np
+import csv
+import re
+import copy
+from random import shuffle
+from itertools import combinations
+
+
+# In[38]:
+
+
+mydict = {}
+
+with open('Description3.csv', mode='r') as inp:
+    reader = csv.reader(inp)
+    df = {rows[0]:rows[1] for rows in reader}
+
+
+# In[39]:
+
+
+df.pop('product')
+
+
+# In[40]:
+
+
+len(df)
+
+
+# In[41]:
+
+
+#for i in df:
+    #df[i] = re.findall('([a-zA-Z0-9]*(([0-9]+[ˆ0-9, ]+)|([ˆ0-9, ]+[0-9]+))[a-zA-Z0-9]*)',df[i])
+
+
+# In[42]:
+
+
+df
+
+
+# In[43]:
+
+
+#for i in df:
+    #df[i] = re.findall("[a-zA-Z0-9]*(([0-9]+[ˆ0-9ˆ,ˆ ]+)|([ˆ0-9ˆ,ˆ ]+[0-9]+))[a-zA-Z0-9]*",df[i])
+
+
+# In[44]:
+
+
+# create the slingle function
+def shingle(text: str, k: int):
+    shingle_set = []
+    for i in range(len(text) - k + 1):     #range: create a sequence from 0 to.. len: return the number of items in a list, for text,一个字符算一个
+        shingle_set.append(text[i:i+k])
+    return set(shingle_set)   
+
+
+# In[69]:
+
+
+shingle_df = copy.deepcopy(df)
+k = 5
+for i in shingle_df:
+    shingle_df[i] = shingle(shingle_df[i],k)
+
+
+# In[46]:
+
+
+#shingle_df
+
+
+# In[71]:
+
+
+# create the vocab to combine all slingle to a vector set
+vocab1 = set()
+for i in shingle_df:
+    vocab1 = set(vocab1.union(shingle_df[i]))
+vocab_list = list(vocab1)
+
+
+# In[72]:
+
+
+#vocab_list
+
+
+# In[73]:
+
+
+vocab_df = copy.deepcopy(df)
+for i in vocab_df:
+    vocab_df[i] = vocab_list
+
+
+# In[74]:
+
+
+#vocab_df
+
+
+# In[75]:
+
+
+for i in vocab_df:
+    vocab_df[i] = [1 if x in shingle_df[i] else 0 for x in vocab_df[i]]
+
+
+# In[76]:
+
+
+#vocab_df['20']
+
+
+# In[77]:
+
+
+#给每个binary按顺序排号
+hash_ex = list(range(1,len(vocab_list)+1))
+#print(hash_ex)
+
+
+# In[78]:
+
+
+#将排好的顺序打乱
+shuffle(hash_ex)
+#print(hash_ex)
+
+
+# In[79]:
+
+
+#找到第一个出现1的signature
+for i in range(1, len(vocab_list)+1):
+    idx = hash_ex.index(i)
+    signature_val = vocab_df['1'][idx]
+    print(f"{i} -> {idx} -> {signature_val}")
+    if signature_val == 1:
+        print('match!')
+        break
+
+
+# In[80]:
+
+
+def create_hash_func(size: int):
+    # function for creating the hash vector/function
+    hash_ex = list(range(1, len(vocab_list)+1))
+    shuffle(hash_ex)
+    return hash_ex   #here return 打乱的顺序数字：（38，82，5，10，12，69，...）
+
+def build_minhash_func(vocab_size: int, nbits: int):
+    # function for building multiple minhash vectors
+    hashes = []
+    for _ in range(nbits):
+        hashes.append(create_hash_func(vocab_size))  #重复打乱nbits次，所以生成了nbits次的上面的数字（38，82..., 但是每次的set都不一样
+    return hashes
+    
+# we create 20 minhash vectors
+minhash_func = build_minhash_func(len(vocab_list),20) #20 is a bit small here 
+
+
+# In[81]:
+
+
+def create_hash(vector: list):
+    # use this function for creating our signatures (eg the matching)
+    signature = []
+    for func in minhash_func:
+        for i in range(1, len(vocab_list)+1):
+            idx = func.index(i)     #给出1，2，3...在minhash_func里面的排名
+            signature_val = vector[idx]  #
+            if signature_val == 1:
+                signature.append(i)
+                break
+    return signature
+
+
+# In[82]:
+
+
+#now create signatures
+sig_df = copy.deepcopy(vocab_df)
+
+
+# In[83]:
+
+
+for i in sig_df:
+    sig_df[i] = create_hash(sig_df[i])
+    
+
+
+# In[84]:
+
+
+#sig_df
+
+
+# In[85]:
+
+
+def jaccard(x,y):
+    return len(x.intersection(y)) / len(x.union(y)) 
+#intersection: return a set that contains items in both x and y
+
+
+# In[86]:
+
+
+#LSH
+def split_vector(signature, b):
+    assert len(signature) % b == 0 #reminder must be zero
+    r = int(len(signature) / b)
+    #code splitting signature in b parts
+    subvecs = []
+    for i in range(0, len(signature), r):
+        subvecs.append(signature[i: i+r])
+    return subvecs
+
+
+# In[87]:
+
+
+band_df = copy.deepcopy(sig_df)
+
+
+# In[88]:
+
+
+for i in band_df:
+    band_df[i] = split_vector(band_df[i],10)
+
+
+# In[89]:
+
+
+band_df['1']
+
+
+# In[90]:
+
+
+band_df['3']
+
+
+# In[91]:
+
+
+#Locality-Sensitive Hashing
+for key1, key2 in combinations(band_df.keys(), r = 2):
+    for i_rows, j_rows in zip(band_df[key1], band_df[key2]):
+            if i_rows == j_rows:
+                print(f"Candidate pair: {key1,key2} {i_rows} == {j_rows}")
